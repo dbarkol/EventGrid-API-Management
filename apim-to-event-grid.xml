@@ -1,0 +1,66 @@
+<policies>
+    <inbound>
+        <base />
+
+        <!-- Limit the number of calls from an IP address -->
+        <rate-limit-by-key calls="5" renewal-period="10" counter-key="@(context.Request.IpAddress)" />
+        
+        <!-- Publish an event to grid -->
+        <send-one-way-request mode="new">
+
+            <set-url>{{event-grid-topic-endpoint}}</set-url>
+            <set-method>POST</set-method>
+            <set-header name="aeg-sas-key" exists-action="override">
+                <value>{{event-grid-topic-key}}</value>
+            </set-header>
+            <set-header name="Content-Type" exists-action="override">
+                <value>application/json</value>
+            </set-header>
+            <set-body>@{      
+
+                // Parse the request body
+                var requestBody = context.Request.Body.As<string>();
+                JObject json = JObject.Parse(requestBody);
+                
+                // Add the customer ID, order details and
+                // request ID of the API call to the event
+                // data property.
+                var data = json["order"];                                                
+                data["customerId"] = json["customerId"];
+                data["requestId"] = context.RequestId;
+
+                // Set the event type based off of the quantity ordered
+                var quantity = (int) json["order"]["quantity"];
+                var eventType = quantity > 50 ? "Contoso.Orders.Large" : "Contoso.Orders.Normal";
+
+                // Events are sent in an array
+                var events = new JArray();
+
+                // Initialize the event and add it to the array
+                var newOrderEvent = new JObject();
+                newOrderEvent.Add("Data", data);
+                newOrderEvent.Add("Subject", "contoso/newOrder");
+                newOrderEvent.Add("EventType", eventType);
+                newOrderEvent.Add("Id", Guid.NewGuid().ToString());
+                newOrderEvent.Add("EventTime", DateTime.UtcNow.ToString());
+                events.Add(newOrderEvent);
+
+                // Format to a string and ready to go!
+                return events.ToString(Newtonsoft.Json.Formatting.None);   
+                             
+            }</set-body>
+        </send-one-way-request>
+        <return-response>
+            <set-status code="200" reason="OK" />
+        </return-response>
+    </inbound>
+    <backend>
+        <base />
+    </backend>
+    <outbound>
+        <base />
+    </outbound>
+    <on-error>
+        <base />
+    </on-error>
+</policies>
